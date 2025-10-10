@@ -1,0 +1,31 @@
+{% extends "layout.html" %}
+{% block content %}
+<h3>Welcome, {{ donor['name'] }} ({{ donor['blood_type'] }})</h3>
+<hr>
+
+<h5>Your Donation History</h5>
+<table class="table table-bordered">
+    <tr><th>Date</th><th>To Hospital</th><th>To Blood Bank</th><th>Units</th></tr>
+    {% for row in donations %}
+    <tr><td>{{ row['transfer_date'] }}</td><td>{{ row['hospital_name'] }}</td><td>{{ row['blood_bank_name'] }}</td><td>{{ row['units'] }}</td></tr>
+    {% endfor %}
+</table>
+
+<h5>Active Blood Requests</h5>
+<table class="table table-striped">
+    <tr><th>Hospital</th><th>Blood Type</th><th>Units Needed</th><th>Urgency</th><th></th></tr>
+    {% for req in requests %}
+    <tr>
+        <td>{{ req['hospital_name'] }}</td>
+        <td>{{ req['blood_type'] }}</td>
+        <td>{{ req['units_needed'] }}</td>
+        <td>{{ req['urgency'] }}</td>
+        <td>
+            <form method="POST" action="{{ url_for('respond_to_request', request_id=req['id']) }}">
+                <button class="btn btn-sm btn-success">Donate</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}
