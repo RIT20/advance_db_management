@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ org.name }} ({{ org.org_id }}) • Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0b1220; --card:#121a2b; --muted:#9fb2d0; --line:#243250; --white:#f7fbff;
+      --bank:#b30000; --hospital:#0f5fff;
+      --ok:#14a44d; --warn:#ff8c1a; --low:#e44; --chip:#1a2742;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; padding:24px; background:var(--bg); color:var(--white);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    .container{max-width:1100px; margin:0 auto}
+    .header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:18px 20px; border-radius:16px; background:var(--card); border:1px solid var(--line);
+      box-shadow:0 10px 30px rgba(0,0,0,.35); flex-wrap:wrap; gap:10px;
+    }
+    .brand{display:flex; gap:14px; align-items:center;}
+    .pill{
+      padding:6px 12px; border-radius:999px; font-weight:600; letter-spacing:.4px; font-size:.82rem;
+      border:1px solid rgba(255,255,255,.15);
+    }
+    .pill.bank{background:color-mix(in oklab, var(--bank) 18%, black);}
+    .pill.hospital{background:color-mix(in oklab, var(--hospital) 18%, black);}
+    .muted{color:var(--muted); font-size:.92rem}
+    .meta{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:8px}
+    .card{
+      margin-top:24px; background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    .card h2{margin:0; padding:16px 18px; border-bottom:1px solid var(--line); font-size:1.05rem; letter-spacing:.3px}
+    .table-wrap{overflow:auto}
+    table{width:100%; border-collapse:collapse; min-width:720px}
+    th,td{padding:12px 14px; text-align:left; border-bottom:1px solid var(--line)}
+    th{color:var(--muted); font-weight:600; background:#0f172a; position:sticky; top:0;}
+    tr:hover td{background:rgba(255,255,255,.02)}
+    .chip{
+      background:var(--chip); padding:6px 10px; border-radius:999px; font-size:.82rem; border:1px solid var(--line)
+    }
+    .units{font-weight:700;}
+    .units.ok{color:var(--ok);}
+    .units.warn{color:var(--warn);}
+    .units.low{color:var(--low);}
+    .toolbar{
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-left:auto;
+    }
+    .btn{
+      appearance:none; border:1px solid var(--line); background:#0a1224; color:var(--white);
+      padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; letter-spacing:.2px;
+      text-decoration:none; display:inline-block;
+    }
+    .btn.primary{background:linear-gradient(135deg, #2563eb, #3b82f6); border:none;}
+    .btn.primary.bank{background:linear-gradient(135deg, #b30000, #ff3b3b);}
+    .row-top{display:flex; align-items:center; justify-content:space-between; padding:14px 18px 0 18px}
+    .search{flex:1; max-width:300px;}
+    .search input{
+      width:100%; background:#0a1224; color:var(--white); border:1px solid var(--line);
+      padding:10px 12px; border-radius:10px;
+    }
+    @media (max-width:640px){.meta{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <div>
+          <div style="font-size:1.25rem; font-weight:800; letter-spacing:.3px">
+            {{ org.name }} <span class="muted">({{ org.org_id }})</span>
+          </div>
+          <div class="meta muted">
+            <div><b>Type:</b> {{ org.org_type }}</div>
+            <div><b>Location:</b> {{ org.city }}, {{ org.state }}</div>
+            <div><b>Phone:</b> {{ org.phone }}</div>
+            <div><b>Email:</b> {{ org.email }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right toolbar -->
+      <div class="toolbar">
+        <span class="pill {% if org.org_type|upper == 'BANK' %}bank{% else %}hospital{% endif %}">
+          {{ org.org_type|upper }}
+        </span>
+
+        <span class="muted" style="margin-left:4px;">
+          Signed in as <b>{{ current_user.username }}</b> • Org <b>{{ current_user.org_id }}</b>
+        </span>
+
+        <a class="btn primary {% if org.org_type|upper == 'BANK' %}bank{% endif %}"
+           href="{{ url_for('new_request') }}">
+          {% if org.org_type|upper == 'BANK' %}Record Shipment{% else %}Request Blood{% endif %}
+        <a class="btn" href="{{ url_for('view_requests') }}">View Requests</a>
+
+
+        <a class="btn" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+    </div>
+
+    <!-- Inventory Card -->
+    <div class="card">
+      <div class="row-top">
+        <h2>Inventory</h2>
+        <div class="search">
+          <input id="q" type="text" placeholder="Filter by blood type or component…" oninput="filterRows()"/>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="inv">
+          <thead>
+            <tr>
+              <th>Blood Type</th>
+              <th>Component</th>
+              <th>Units</th>
+              <th>Updated At</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in inventory %}
+              {% set cls = 'ok' if (r.units or 0) >= 10 else ('warn' if (r.units or 0) >= 5 else 'low') %}
+              <tr>
+                <td><span class="chip">{{ r.blood_type }}</span></td>
+                <td><span class="chip">{{ r.component }}</span></td>
+                <td class="units {{ cls }}">{{ r.units if r.units is not none else 0 }}</td>
+                <td class="muted">{{ r.updated_at }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function filterRows(){
+      const q = document.getElementById('q').value.toLowerCase().trim();
+      const rows = document.querySelectorAll('#inv tbody tr');
+      rows.forEach(tr => {
+        const txt = tr.innerText.toLowerCase();
+        tr.style.display = txt.includes(q) ? '' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>
