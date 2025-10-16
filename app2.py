@@ -51,7 +51,7 @@ DATABASE = 'blood_bank.db'
 ORG_CSV = os.path.join('organization.csv')   # org_id, org_type, name, address, city, state, zip, phone, email
 INV_CSV = os.path.join('inventory.csv')      # org_id, blood_type, component, units, updated_at
 CREDS_CSV = os.path.join('users.csv')        # username, password (PLAIN), id (=org_id), role
-
+DONOR_CSV = os.path.join(BASE_DIR,'donor.csv')
 # ----------------------------------
 # DB helpers
 # ----------------------------------
@@ -174,6 +174,28 @@ def init_sql_schema_if_needed():
     );
     """)
 
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS donor (
+        DonorID             INTEGER PRIMARY KEY,         -- e.g., 8876001 (no commas)
+        FirstName           TEXT NOT NULL,
+        MiddleName          TEXT,
+        LastName            TEXT NOT NULL,
+        Gender              TEXT CHECK(Gender IN ('Male','Female')),
+        Age                 INTEGER,
+        BloodType           TEXT,                        -- e.g., 'A+', 'O-'
+        Level               INTEGER CHECK(Level IN (1,2,3)),   -- 1=Emergency, 2=Blood Drive, 3=Both
+        Phone               TEXT,
+        Email               TEXT,
+        Location            TEXT,
+        City                TEXT,
+        State               TEXT,
+        Pincode             INTEGER,                     -- e.g., 7085, 8876
+        MedicalHistory      TEXT,
+        last_donation_date  TEXT,                        -- store as ISO string 'YYYY-MM-DD'
+        preferred_contact   TEXT CHECK(preferred_contact IN ('Email','SMS','Both'))
+    );
+    """)
+
     db.commit()
 
 # ----------------------------------
@@ -252,6 +274,25 @@ def import_csvs_into_sqlite():
                     VALUES (?, ?, ?, ?);
                 """, (username, hashed, role, org_id))
         db.commit()
+
+    if os.path.exists(DONOR_CSV):
+        donor_df = pd.read_csv(DONOR_CSV)
+    # clean up commas in DonorID and Pincode
+        donor_df["DonorID"] = donor_df["DonorID"].astype(str).str.replace(",", "").astype(int)
+        donor_df["Pincode"] = donor_df["Pincode"].astype(str).str.replace(",", "").astype(int)
+
+        required_cols = [
+                 "DonorID","FirstName","MiddleName","LastName","Gender","Age","BloodType","Level",
+                 "Phone","Email","Location","City","State","Pincode","MedicalHistory",
+                 "last_donation_date","preferred_contact"
+        ]
+        missing_cols = [c for c in required_cols if c not in donor_df.columns]
+        if missing_cols:
+             raise RuntimeError(f"donor.csv missing columns: {missing_cols}")
+
+        donor_df = donor_df[required_cols].dropna(subset=["DonorID"]).drop_duplicates(subset=["DonorID"])
+        donor_df.to_sql("donor", db, if_exists="replace", index=False)
+        db.commit()   
 
 def ensure_indexes():
     db = get_db()
@@ -513,6 +554,46 @@ def logout():
 @login_required
 def dashboard():
     db = get_db()
+    role = (current_user.role or "").upper().strip()
+
+    # -------------------- DONOR DASHBOARD --------------------
+        # -------------------- DONOR DASHBOARD --------------------
+    if role == "DONOR":
+        donor = db.execute("""
+            SELECT * FROM donor WHERE DonorID = CAST(? AS INTEGER);
+        """, (current_user.org_id,)).fetchone()
+
+        # Determine which levels donor can respond to
+        if donor["Level"] == 1:
+            level_filter = ["CRITICAL"]
+        elif donor["Level"] == 2:
+            level_filter = ["BLOOD DRIVE"]
+        else:
+            level_filter = ["CRITICAL", "BLOOD DRIVE"]
+
+        # Build the SQL placeholders for IN clause
+        placeholders = ",".join("?" * len(level_filter))
+
+        # ✅ Combined requests (Hospitals + Banks)
+        query = f"""
+            SELECT r.request_id, o.name, o.org_type, o.city, o.state,
+                   r.blood_type, r.component, r.units, r.level, r.status
+            FROM requests r
+            JOIN organization o ON r.org_id = o.org_id
+            WHERE UPPER(r.level) IN ({placeholders})
+              AND UPPER(o.org_type) IN ('HOSPITAL', 'BANK')
+            ORDER BY datetime(r.created_at) DESC;
+        """
+
+        requests_rows = db.execute(query, level_filter).fetchall()
+
+        # Render donor dashboard
+        return render_template("donor_dashboard.html", donor=donor, requests_rows=requests_rows)
+
+
+
+
+    # -------------------- ORGANIZATION DASHBOARD (unchanged) --------------------
     org = db.execute("""
         SELECT org_id, org_type, name, address, city, state, zip, phone, email
         FROM organization
@@ -527,6 +608,7 @@ def dashboard():
     """, (current_user.org_id,)).fetchall()
 
     return render_template('org_dashboard.html', org=org, inventory=inventory_rows)
+
 
 @app.route('/requests')
 @login_required
